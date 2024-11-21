@@ -251,15 +251,15 @@ class CubeDestripe():
                 ext = "_nocorr"
 
 
-    def run_stage3_extract(self, input_vars=None, fringe=False, run=True):
+    def run_stage3_extract(self, input_vars=None, fringe=False, run=True, ifu_rscale=1.):
         if input_vars is None:
             input_vars = {"stage3": {"ifu_autocen": True,
                             "ifu_rfcorr": False, ## THIS ONE MATTERS FOR THE FRINGING
-                            "ifu_rscale": 2., ## THIS ONE IS WORTH THINKING ABOUT TOO ! WHAT DOES HELENA USUALLY DO? I had 2 for w0458 but i think it's 1 for default?
                             "subtract_background": False,
                             "save_results": True,
                             "coord_system": "ifualign"}}
         input_vars["stage3"]["fringe"] = fringe
+        input_vars["stage3"]["ifu_rscale"] = ifu_rscale
 
         outdir_flat = os.path.join(self.outfolder,"flat_extract1d")
         outdir_basic = os.path.join(self.outfolder,"basic_extract1d")
@@ -356,7 +356,7 @@ if __name__ == "__main__":
         cube_destripe = CubeDestripe(file, outfolder="example_outputs_w0458")
         cube_destripe.mask_source()
         cube_destripe.destripe()
-        cube_destripe.run_stage3_extract(fringe=False, run=True)
+        cube_destripe.run_stage3_extract(fringe=False, run=True, ifu_rscale=2.)
         cube_destripe.plot_spectra_with_flattening()
 
         if i_file > 2:
