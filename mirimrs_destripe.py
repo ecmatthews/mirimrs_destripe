@@ -16,20 +16,6 @@ from jwst import pipeline # JWST pipeline
 import os
 import glob
 
-filelist = sorted(glob.glob("../W0458/data_reprocessed211123/*s3d*"))
-
-## PARS -- TODO TODO WHAT IS THiS
-sidecut = 6 ## size of box to find max pixel
-##
-# radlist = [2,3,4,5,6] ## list of n_fwhm to play with !
-radlist = [1, 1.5, 2, 2.5, 3]
-colorlist = sns.husl_palette(n_colors=len(radlist)) ## associated color list.
-
-if not os.path.isdir("flat_cubefiles"): ## TODO move this !!!
-    os.mkdir("flat_cubefiles")
-# if not os.path.isdir("plots"):
-#     os.mkdir("plots")
-
 
 ### some plot settings
 plt.style.use('~/tools/elisabeth.mplstyle')
@@ -44,7 +30,7 @@ rcParams["axes.labelsize"] = 12
 
 def extract_1d(file, out_dir, input_vars): 
     ''' 
-    extract 1d array from cube
+    extract 1d array from cube -- from Helena
     '''
     print('start 1d extraction')
     im = datamodels.IFUCubeModel(file)
@@ -70,7 +56,9 @@ def extract_1d(file, out_dir, input_vars):
 
 
 class CubeDestripe():
-    def __init__(self, file_ifualign,mask_rad=4):
+    def __init__(self, file_ifualign, mask_rad=4, outfolder="."):
+
+        self.outfolder = outfolder
 
         self.file_ifualign = file_ifualign
         self.cube_ifualign = fits.open(file_ifualign)
@@ -91,14 +79,14 @@ class CubeDestripe():
 
         self.diagnostic_plots = True
         if self.diagnostic_plots:
-            if not os.path.isdir("diagnostic_plots"):
-                os.mkdir("diagnostic_plots")
+            if not os.path.isdir(os.path.join(self.outfolder,"diagnostic_plots")):
+                os.mkdir(os.path.join(self.outfolder,"diagnostic_plots"))
 
+        if not os.path.isdir(os.path.join(self.outfolder,"flat_cubefiles")): ## TODO move this !!!
+            os.mkdir(os.path.join(self.outfolder,"flat_cubefiles"))
 
-        ## TODO better out name
-        self.out_cube_name = "flat_cubefiles/" + file_ifualign.replace("s3d","s3d_elisabethfix").split("/")[-1]
-        if not os.path.isdir("flat_cubefiles"):
-            os.mkdir("flat_cubefiles")
+        ## better outfile name!
+        self.out_cube_name = os.path.join(self.outfolder,"flat_cubefiles",file_ifualign.replace("s3d","flatten_s3d").split("/")[-1])
 
         ## parameters
         self.mask_rad = mask_rad
@@ -235,9 +223,10 @@ class CubeDestripe():
                 axs[2].plot(ymean, ylin, "o-", color="black", ms=3)
                 #
                 ##
-                nparts = 3 ## TODO pop these somewhere else!
                 start = 0
+                nparts = 3
                 colorpart = ["orange", "limegreen", "blueviolet"]
+                ## TODO hardcoded fractions & colors for the diagnostics plots
                 for n in range(nparts):
                     stop = start + int(cube.shape[0]/nparts)
                     im_sci2 = np.sum(cube[start:stop,:,:], axis=0)
@@ -248,9 +237,9 @@ class CubeDestripe():
                     axs[1].errorbar(xlin+0.1*(n+1), xmean2, yerr=xstd2, color=colorpart[n], fmt="o-", markersize=3)
                     axs[2].errorbar(ymean2, ylin+0.1*(n+1), xerr=ystd2, color=colorpart[n], fmt="o-", markersize=3)
                     start = stop
-                plt.suptitle(file[file.index("ch"):file.index("s3d")-1])
+                plt.suptitle(f"{self.ch}{self.chpartL}")
 
-                plt.savefig(f"diagnostic_plots/cube_masked_bgval_{self.ch}{self.chpartL}{ext}.pdf")
+                plt.savefig(os.path.join(self.outfolder,"diagnostic_plots",f"cube_masked_bgval_{self.ch}{self.chpartL}{ext}.pdf"))
                 ext = "_nocorr"
 
 
@@ -264,8 +253,8 @@ class CubeDestripe():
                             "coord_system": "ifualign"}}
         input_vars["stage3"]["fringe"] = fringe
 
-        outdir_flat = "flat_extract1d" ## TODO!
-        outdir_basic = "basic_extract1d"
+        outdir_flat = os.path.join(self.outfolder,"flat_extract1d")
+        outdir_basic = os.path.join(self.outfolder,"basic_extract1d")
         if fringe:
             outdir_flat = outdir_flat + "_fringe"
             outdir_basic = outdir_basic + "_fringe"
@@ -294,16 +283,16 @@ class CubeDestripe():
         ## note have to run run_stage3_extract before calling this function
         ## (can run it with run=False to just set-up path names)
 
-        if not os.path.isdir("plots_speccompare"):
-            os.makedirs("plots_speccompare")
+        if not os.path.isdir(os.path.join(self.outfolder,"plots_speccompare")):
+            os.mkdir(os.path.join(self.outfolder,"plots_speccompare"))
 
         hdul_basic = fits.open(self.outdir_basic+"/"+f"Level3_ch{self.ch}-{self.chpart}_extract1dstep.fits")
-        hdul_flat = fits.open(self.outdir_flat+"/"+f"Level3_ch{self.ch}-{self.chpart}_s3d_elisabethfix_extract1dstep.fits") ## TODO we *have* to make these names better
+        hdul_flat = fits.open(self.outdir_flat+"/"+f"Level3_ch{self.ch}-{self.chpart}_flatten_extract1dstep.fits")
 
         fig0, ax0 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
-        chdic = {"1short":0, "1medium":1, "1long":2, "2short":3, "2medium":4, "2long":5, "3short":6, "3medium":7, "3long":8}
+        chdic = {"1short":0, "1medium":1, "1long":2, "2short":3, "2medium":4, "2long":5, "3short":6, "3medium":7, "3long":8, "4short":6, "4medium":7, "4long":8}
 
-        ## TODO idk how to do the all-spectra plot, tbh.
+        ## TODO idk how to do the all-spectra plot. Broken since I do a single file at a time in the current setup.
         # fig0, ax0 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
 
         fig1, ax1 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
@@ -333,9 +322,9 @@ class CubeDestripe():
 
         ax1[1].text(0.01, 0.97, f'Channel {self.ch}{self.chpartL}', horizontalalignment='left', verticalalignment='top', transform = ax1[0].transAxes, fontsize=15)
         fig1.align_ylabels(ax1[:])
-        fig1.savefig(f"plots_speccompare/spec_{self.ch}{self.chpartL}.pdf")
+        fig1.savefig(os.path.join(self.outfolder,"plots_speccompare",f"spec_{self.ch}{self.chpartL}.pdf"))
 
-        ## TODO bring this back somehow?? plot of all spectra overlaid
+        ## TODO bring this back somehow?? plot of all spectra overlaid. Broken since I do a single file at a time in the current setup.
         # ax0[1].set_xlabel("Wavelength [um]")
         # ax0[0].set_ylabel("Flux [mJy]")
         # ax0[1].set_ylabel("Difference [mJy]")
@@ -347,17 +336,18 @@ class CubeDestripe():
         # fig0.savefig("plots_speccompare/full_spec.pdf")
 
 
+if __name__ == "__main__":
 
+    filelist = sorted(glob.glob("../W0458/data_reprocessed2301024_ifualign/*s3d*"))
+    print(filelist)
 
-filelist = sorted(glob.glob("../W0458/data_reprocessed2301024_ifualign/*s3d*"))
-print(filelist)
+    for i_file, file in enumerate(filelist):
+        cube_destripe = CubeDestripe(file, outfolder="blablabla")
+        cube_destripe.mask_source()
+        cube_destripe.destripe()
+        cube_destripe.run_stage3_extract(fringe=False, run=True)
+        cube_destripe.plot_spectra_with_flattening()
 
-for i_file, file in enumerate(filelist):
-    cube_destripe = CubeDestripe(file)
-    cube_destripe.mask_source()
-    cube_destripe.destripe()
-    cube_destripe.run_stage3_extract(fringe=False, run=True)
-    cube_destripe.plot_spectra_with_flattening()
+        if i_file > 2:
+            break
 
-## TODO need a "run full" option
-## TODO next up, need better naming conventions for all the directories and stuff
