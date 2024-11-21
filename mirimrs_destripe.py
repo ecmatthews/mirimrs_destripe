@@ -8,34 +8,92 @@ import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
 import matplotlib.ticker as ticker
+import re
 
+import jwst
+from jwst import datamodels # JWST datamodels
+from jwst import pipeline # JWST pipeline
+import os
+import glob
 
 filelist = sorted(glob.glob("../W0458/data_reprocessed211123/*s3d*"))
 
-## PARS
+## PARS -- TODO TODO WHAT IS THiS
 sidecut = 6 ## size of box to find max pixel
 ##
 # radlist = [2,3,4,5,6] ## list of n_fwhm to play with !
 radlist = [1, 1.5, 2, 2.5, 3]
 colorlist = sns.husl_palette(n_colors=len(radlist)) ## associated color list.
 
-if not os.path.isdir("flat_cubefiles"):
+if not os.path.isdir("flat_cubefiles"): ## TODO move this !!!
     os.mkdir("flat_cubefiles")
-if not os.path.isdir("plots"):
-    os.mkdir("plots")
+# if not os.path.isdir("plots"):
+#     os.mkdir("plots")
 
 
-## OOP !!!
+### some plot settings
+plt.style.use('~/tools/elisabeth.mplstyle')
+
+from matplotlib import rcParams
+rcParams["axes.grid"] = False
+## set label sizes
+rcParams["xtick.labelsize"] = 12
+rcParams["ytick.labelsize"] = 12
+rcParams["axes.labelsize"] = 12
+
+
+def extract_1d(file, out_dir, input_vars): 
+    ''' 
+    extract 1d array from cube
+    '''
+    print('start 1d extraction')
+    im = datamodels.IFUCubeModel(file)
+
+    step = pipeline.calwebb_spec3.extract_1d_step.Extract1dStep()
+    step.output_dir = out_dir
+    
+    vars = input_vars['stage3']
+    step.save_results = vars['save_results']
+
+    if vars['ifu_autocen']:
+        step.ifu_autocen = True #, autocenter of circle where to take the mean
+    else:
+        step.center_xy = vars['center_x'], vars['center_y'] #24, 29
+    
+    step.ifu_rfcorr = vars['ifu_rfcorr'] #True  # , residual fringe correction instead in spec2
+    step.subtract_background = vars['subtract_background'] #False  # , take ring around as background and subtract, only do this the first time
+    step.ifu_rscale = vars['ifu_rscale'] #1  # set number of FWHMs fro radius
+    
+    print('run step')
+    step(im)
+    print('done')
+
 
 class CubeDestripe():
     def __init__(self, file_ifualign,mask_rad=4):
 
+        self.file_ifualign = file_ifualign
         self.cube_ifualign = fits.open(file_ifualign)
         self.cube_copy = fits.open(file_ifualign)
 
         ## read in cube, and make a copy -- where we can apply masking
         self.cube_sci = self.cube_ifualign["SCI"].data
         self.cube_sci_mask = self.cube_sci.copy()
+
+        ## work out what the channel names are
+        match = re.search("Level3_ch(\d+)-(\w+)_s3d", file_ifualign)
+
+        self.ch = match.group(1)
+        self.chpart = match.group(2)
+        chcode = {"short": "A", "medium": "B", "long": "C"}
+        self.chpartL = chcode[self.chpart]
+
+
+        self.diagnostic_plots = True
+        if self.diagnostic_plots:
+            if not os.path.isdir("diagnostic_plots"):
+                os.mkdir("diagnostic_plots")
+
 
         ## TODO better out name
         self.out_cube_name = "flat_cubefiles/" + file_ifualign.replace("s3d","s3d_elisabethfix").split("/")[-1]
@@ -48,6 +106,33 @@ class CubeDestripe():
         ## diagnostics
         if not self.cube_ifualign["SCI"].header["BUNIT"] == "MJy/sr":
             raise ValueError(f"{file_ifualign} is not in MJy/sr")
+
+
+    # def plot_background_diagnostic(self):
+
+    #     width=0.6
+    #     height=width*im_sci.shape[0]/im_sci.shape[1]
+    #     barwidth=0.2
+    #     gap = 0.03
+    #     startx = 0.15
+    #     starty = 0.1
+    #     axs[0].set_position([startx, starty+gap+barwidth, width, height]) ## main
+    #     axs[1].set_position([startx, starty, width, barwidth]) ## bottom
+    #     axs[2].set_position([startx+gap+width, starty+gap+barwidth, barwidth, height]) ## right
+    #     #
+    #     axs[1].yaxis.set_major_locator(plt.MultipleLocator(1_000))
+    #     axs[2].xaxis.set_major_locator(plt.MultipleLocator(1_000))
+    #     axs[2].tick_params(axis='x', labelrotation=90)
+    #     axs[1].set_ylabel("Mean pixel value\n[y direction]")
+    #     axs[2].set_xlabel("Mean pixel value\n[x direction]")
+    #     #
+    #     axs[0].set_xticks([])
+    #     axs[0].set_yticks([])
+    #     axs[1].set_xticks([])
+    #     axs[2].set_yticks([])
+    #     axs[3].axis("off")
+
+    #     plt.savefig(f"diagnostic_plots/backgroundvariance_{file[file.index('ch'):file.index('s3d')-1]}_mask{masking}.pdf")
 
 
     def mask_source(self):
@@ -65,16 +150,17 @@ class CubeDestripe():
         ## block out the max (target)
         pos = np.array(np.unravel_index(np.nanargmax(im_sci), im_sci.shape))
         self.cube_sci_mask[:, pos[0]-self.mask_rad:pos[0]+self.mask_rad, pos[1]-self.mask_rad:pos[1]+self.mask_rad] = np.nan
-        # im_sci = np.sum(self.cube_sci_mask, axis=0)
+        im_sci = np.sum(self.cube_sci_mask, axis=0)
 
         ## and block out the two minima (dither subtraction copies of target)
         for i in range(2):
             pos = np.array(np.unravel_index(np.nanargmin(im_sci), im_sci.shape))
+            print("!!!", pos)
             self.cube_sci_mask[:, pos[0]-self.mask_rad:pos[0]+self.mask_rad, pos[1]-self.mask_rad:pos[1]+self.mask_rad] = np.nan
-            # im_sci = np.sum(self.cube_sci_mask, axis=0)
+            im_sci = np.sum(self.cube_sci_mask, axis=0)
         im_sci = np.sum(self.cube_sci_mask, axis=0)
 
-        ## TODO need a diagnostic plot of cube_sci_mask i thinkkk -> and an im_sci plot (?)
+        self.cube_sci_mask_hold = self.cube_sci_mask.copy()
 
     def destripe(self):
         '''
@@ -109,97 +195,157 @@ class CubeDestripe():
         im_sci = np.sum(self.cube_sci, axis=0)
         im_sci_mask = np.sum(self.cube_sci_mask, axis=0)
 
+        if self.diagnostic_plots:
+
+            ext = "_corr"
+            for cube in [self.cube_sci_mask, self.cube_sci_mask_hold]:
+
+                im_sci = np.sum(cube, axis=0)
+
+                # Create a figure with a 2x3 grid using gridspec
+                fig = plt.figure(figsize=(7, 7))
+                gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[3,1])
+                axs = [fig.add_subplot(gs[0, 0])]
+                axs.append(fig.add_subplot(gs[1, 0], sharex=axs[0]))
+                axs.append(fig.add_subplot(gs[0, 1], sharey=axs[0]))
+                axs.append(fig.add_subplot(gs[1, 1]))
+                ## 
+
+                im = axs[0].imshow(im_sci, origin="lower", cmap="Greys_r")
+
+                xlin = np.linspace(0, im_sci.shape[1]-1, num=im_sci.shape[1])
+                ylin = np.linspace(0, im_sci.shape[0]-1, num=im_sci.shape[0])
+                #
+                xmean = np.nanmean(im_sci, axis=0)
+                ymean = np.nanmean(im_sci, axis=1)
+                #
+                xstd = np.nanstd(im_sci, axis=0)
+                ystd = np.nanstd(im_sci, axis=1)
+
+                # axs[1].plot(xlin, xmean-xstd, "-", color="grey")
+                # axs[1].plot(xlin, xmean+xstd, "-", color="grey")
+                axs[1].fill_between(xlin, xmean-xstd, xmean+xstd, color="grey")
+                axs[1].plot(xlin, np.zeros_like(xlin), "--", color="red", lw=2, zorder=10)
+                axs[1].plot(xlin, xmean, "o-", color="black", ms=3)
+                #
+                axs[2].plot(ymean-ystd, ylin, "-", color="grey")
+                axs[2].plot(ymean+ystd, ylin, "-", color="grey")
+                axs[2].fill_betweenx(ylin, ymean-ystd, ymean+ystd, color="grey")
+                axs[2].plot(np.zeros_like(ylin), ylin, "--", color="red", lw=2, zorder=10)
+                axs[2].plot(ymean, ylin, "o-", color="black", ms=3)
+                #
+                ##
+                nparts = 3 ## TODO pop these somewhere else!
+                start = 0
+                colorpart = ["orange", "limegreen", "blueviolet"]
+                for n in range(nparts):
+                    stop = start + int(cube.shape[0]/nparts)
+                    im_sci2 = np.sum(cube[start:stop,:,:], axis=0)
+                    xmean2 = np.nanmean(im_sci2, axis=0)
+                    xstd2 = np.nanstd(im_sci2, axis=0)
+                    ymean2 = np.nanmean(im_sci2, axis=1)
+                    ystd2 = np.nanstd(im_sci2, axis=1)
+                    axs[1].errorbar(xlin+0.1*(n+1), xmean2, yerr=xstd2, color=colorpart[n], fmt="o-", markersize=3)
+                    axs[2].errorbar(ymean2, ylin+0.1*(n+1), xerr=ystd2, color=colorpart[n], fmt="o-", markersize=3)
+                    start = stop
+                plt.suptitle(file[file.index("ch"):file.index("s3d")-1])
+
+                plt.savefig(f"diagnostic_plots/cube_masked_bgval_{self.ch}{self.chpartL}{ext}.pdf")
+                ext = "_nocorr"
 
 
-    def diagnostic_plots(self):
+    def run_stage3_extract(self, input_vars=None, fringe=False, run=True):
+        if input_vars is None:
+            input_vars = {"stage3": {"ifu_autocen": True,
+                            "ifu_rfcorr": False, ## THIS ONE MATTERS FOR THE FRINGING
+                            "ifu_rscale": 2., ## THIS ONE IS WORTH THINKING ABOUT TOO ! WHAT DOES HELENA USUALLY DO? I had 2 for w0458 but i think it's 1 for default?
+                            "subtract_background": False,
+                            "save_results": True,
+                            "coord_system": "ifualign"}}
+        input_vars["stage3"]["fringe"] = fringe
 
-        return None ## TODO TODOOOOOO diagnostic plots !!! (split per function ??)
+        outdir_flat = "flat_extract1d" ## TODO!
+        outdir_basic = "basic_extract1d"
+        if fringe:
+            outdir_flat = outdir_flat + "_fringe"
+            outdir_basic = outdir_basic + "_fringe"
+        else:
+            outdir_flat = outdir_flat + "_nofringe"
+            outdir_basic = outdir_basic + "_nofringe"
+        self.outdir_flat = outdir_flat
+        self.outdir_basic = outdir_basic
 
-        # Create a figure with a 2x3 grid using gridspec
-        fig = plt.figure(figsize=(7, 7))
-        gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[3,1])
-        axs = [fig.add_subplot(gs[0, 0])]
-        axs.append(fig.add_subplot(gs[1, 0], sharex=axs[0]))
-        axs.append(fig.add_subplot(gs[0, 1], sharey=axs[0]))
-        axs.append(fig.add_subplot(gs[1, 1]))
-        ## 
-
-        im = axs[0].imshow(im_sci, origin="lower", cmap="Greys_r")
-
-        xlin = np.linspace(0, im_sci.shape[1]-1, num=im_sci.shape[1])
-        ylin = np.linspace(0, im_sci.shape[0]-1, num=im_sci.shape[0])
         #
-        xmean = np.nanmean(im_sci, axis=0)
-        ymean = np.nanmean(im_sci, axis=1)
-        #
-        xstd = np.nanstd(im_sci, axis=0)
-        ystd = np.nanstd(im_sci, axis=1)
+        if not os.path.isdir(outdir_flat):
+            os.mkdir(outdir_flat)
+        if not os.path.isdir(outdir_basic):
+            os.mkdir(outdir_basic)
 
-        # axs[1].plot(xlin, xmean-xstd, "-", color="grey")
-        # axs[1].plot(xlin, xmean+xstd, "-", color="grey")
-        axs[1].fill_between(xlin, xmean-xstd, xmean+xstd, color="grey")
-        axs[1].plot(xlin, np.zeros_like(xlin), "--", color="red", lw=2, zorder=10)
-        axs[1].plot(xlin, xmean, "o-", color="black", ms=3)
-        #
-        axs[2].plot(ymean-ystd, ylin, "-", color="grey")
-        axs[2].plot(ymean+ystd, ylin, "-", color="grey")
-        axs[2].fill_betweenx(ylin, ymean-ystd, ymean+ystd, color="grey")
-        axs[2].plot(np.zeros_like(ylin), ylin, "--", color="red", lw=2, zorder=10)
-        axs[2].plot(ymean, ylin, "o-", color="black", ms=3)
-        #
-        ##
-        nparts = 3
-        start = 0
-        # colorpart = ["red", "orange", "green", "blue", "violet", "purple", "pink"]
-        colorpart = ["orange", "limegreen", "blueviolet"]
-        for n in range(nparts):
-            print("!", n)
-            print("shape",cube_sci_mask_slicewise.shape)
-            stop = start + int(cube_sci_mask_slicewise.shape[0]/nparts)
-            print(">",start, stop, "\n")
-            im_sci2 = np.sum(cube_sci_mask_slicewise[start:stop,:,:], axis=0)
-            xmean2 = np.nanmean(im_sci2, axis=0)
-            xstd2 = np.nanstd(im_sci2, axis=0)
-            ymean2 = np.nanmean(im_sci2, axis=1)
-            ystd2 = np.nanstd(im_sci2, axis=1)
-            axs[1].errorbar(xlin+0.1*(n+1), xmean2, yerr=xstd2, color=colorpart[n], fmt="o-", markersize=3)
-            axs[2].errorbar(ymean2, ylin+0.1*(n+1), xerr=ystd2, color=colorpart[n], fmt="o-", markersize=3)
-            start = stop
-        # this adds a scalebar for the images
-        # divider = make_axes_locatable(axs[0])
-        # cax = divider.append_axes('left', size='5%', pad=0.6)
-        # fig.colorbar(im, cax=cax, orientation="vertical", ticklocation="left")
-        # cax.set_ylabel("Counts")
-        plt.suptitle(file[file.index("ch"):file.index("s3d")-1])
 
-        ## TODO 
-        ##
-        width=0.6
-        height=width*im_sci.shape[0]/im_sci.shape[1]
-        barwidth=0.2
-        gap = 0.03
-        startx = 0.15
-        starty = 0.1
-        axs[0].set_position([startx, starty+gap+barwidth, width, height]) ## main
-        axs[1].set_position([startx, starty, width, barwidth]) ## bottom
-        axs[2].set_position([startx+gap+width, starty+gap+barwidth, barwidth, height]) ## right
-        #
-        axs[1].yaxis.set_major_locator(plt.MultipleLocator(1_000))
-        axs[2].xaxis.set_major_locator(plt.MultipleLocator(1_000))
-        axs[2].tick_params(axis='x', labelrotation=90)
-        axs[1].set_ylabel("Mean pixel value\n[y direction]")
-        axs[2].set_xlabel("Mean pixel value\n[x direction]")
-        #
-        axs[0].set_xticks([])
-        axs[0].set_yticks([])
-        axs[1].set_xticks([])
-        axs[2].set_yticks([])
-        axs[3].axis("off")
+        if run:
+            ## run the extraction!
+            extract_1d(self.out_cube_name, outdir_flat, input_vars)
 
-        plt.savefig(f"plots/backgroundvariance_{file[file.index('ch'):file.index('s3d')-1]}_mask{masking}.pdf")
+            ## also run the extraction on the "unflattened" cubes
+            extract_1d(self.file_ifualign, outdir_basic, input_vars)
 
-        # plt.show()
-        plt.close("all")
+    def plot_spectra_with_flattening(self):
+        
+        ## note have to run run_stage3_extract before calling this function
+        ## (can run it with run=False to just set-up path names)
+
+        if not os.path.isdir("plots_speccompare"):
+            os.makedirs("plots_speccompare")
+
+        hdul_basic = fits.open(self.outdir_basic+"/"+f"Level3_ch{self.ch}-{self.chpart}_extract1dstep.fits")
+        hdul_flat = fits.open(self.outdir_flat+"/"+f"Level3_ch{self.ch}-{self.chpart}_s3d_elisabethfix_extract1dstep.fits") ## TODO we *have* to make these names better
+
+        fig0, ax0 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
+        chdic = {"1short":0, "1medium":1, "1long":2, "2short":3, "2medium":4, "2long":5, "3short":6, "3medium":7, "3long":8}
+
+        ## TODO idk how to do the all-spectra plot, tbh.
+        # fig0, ax0 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
+
+        fig1, ax1 = plt.subplots(2, 1, figsize=(11, 5), sharex=True, gridspec_kw={"height_ratios": [3, 1], "hspace": 0.03})
+
+        cc_flat = sns.husl_palette(9, l=0.5)
+        cc_basic = sns.husl_palette(9, l=0.7)
+        ccix = chdic[f"{self.ch}{self.chpart}"]
+
+        for ax in [ax1]:
+
+            ax[0].errorbar(hdul_basic["EXTRACT1D"].data["WAVELENGTH"], 1000*hdul_basic["EXTRACT1D"].data["FLUX"]+0, yerr=1000*hdul_basic["EXTRACT1D"].data["FLUX_ERROR"], fmt="o-", color=cc_basic[ccix], ms=1)
+
+            ax[0].errorbar(hdul_flat["EXTRACT1D"].data["WAVELENGTH"], 1000*hdul_flat["EXTRACT1D"].data["FLUX"], yerr=1000*hdul_flat["EXTRACT1D"].data["FLUX_ERROR"], fmt="o-", label="ch{}-{}".format(self.ch, self.chpart), color=cc_flat[ccix], ms=1)
+
+            diff = hdul_flat["EXTRACT1D"].data["FLUX"] - hdul_basic["EXTRACT1D"].data["FLUX"]
+            ediff = np.sqrt(hdul_flat["EXTRACT1D"].data["FLUX_ERROR"]**2 + hdul_basic["EXTRACT1D"].data["FLUX_ERROR"]**2)
+
+            ax[1].errorbar(hdul_flat["EXTRACT1D"].data["WAVELENGTH"], 1000*diff, yerr=1000*ediff, fmt="o-", color=cc_flat[ccix], ms=1)
+
+        ccix += 1
+
+        ax1[1].set_xlabel("Wavelength [um]")
+        ax1[0].set_ylabel("Flux [mJy]")
+        ax1[1].set_ylabel("Difference [mJy]")
+        w0, w1 = [np.min(hdul_basic["EXTRACT1D"].data["WAVELENGTH"]), np.max(hdul_basic["EXTRACT1D"].data["WAVELENGTH"])]
+        ax1[1].set_xlim(w0-(w1-w0)*0.02, w1+(w1-w0)*0.02)
+
+        ax1[1].text(0.01, 0.97, f'Channel {self.ch}{self.chpartL}', horizontalalignment='left', verticalalignment='top', transform = ax1[0].transAxes, fontsize=15)
+        fig1.align_ylabels(ax1[:])
+        fig1.savefig(f"plots_speccompare/spec_{self.ch}{self.chpartL}.pdf")
+
+        ## TODO bring this back somehow?? plot of all spectra overlaid
+        # ax0[1].set_xlabel("Wavelength [um]")
+        # ax0[0].set_ylabel("Flux [mJy]")
+        # ax0[1].set_ylabel("Difference [mJy]")
+        # ax0[1].set_ylim([-0.5,0.5])
+        # w0, w1 = [4.900400095357327, 17.978749789996073]
+        # ax0[1].set_xlim(w0-(w1-w0)*0.02, w1+(w1-w0)*0.02)
+        # ax0[0].text(0.01, 0.97, f'Channels 1-3', horizontalalignment='left', verticalalignment='top', transform = ax0[0].transAxes, fontsize=15)
+        # fig0.align_ylabels(ax0[:])
+        # fig0.savefig("plots_speccompare/full_spec.pdf")
+
 
 
 
@@ -209,7 +355,9 @@ print(filelist)
 for i_file, file in enumerate(filelist):
     cube_destripe = CubeDestripe(file)
     cube_destripe.mask_source()
-    cube_destripe.destripe() ## I have to pass the correct cube here somehow there's some interdependency ... but check this even works, first. TODO !
+    cube_destripe.destripe()
+    cube_destripe.run_stage3_extract(fringe=False, run=True)
+    cube_destripe.plot_spectra_with_flattening()
 
-    if i_file > 3:
-        break
+## TODO need a "run full" option
+## TODO next up, need better naming conventions for all the directories and stuff
