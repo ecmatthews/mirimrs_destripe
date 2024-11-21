@@ -28,80 +28,89 @@ if not os.path.isdir("plots"):
 ## OOP !!!
 
 class CubeDestripe():
-    def __init__(self, file_ifualign):
+    def __init__(self, file_ifualign,mask_rad=4):
 
         self.cube_ifualign = fits.open(file_ifualign)
         self.cube_copy = fits.open(file_ifualign)
 
+        ## read in cube, and make a copy -- where we can apply masking
+        self.cube_sci = self.cube_ifualign["SCI"].data
+        self.cube_sci_mask = self.cube_sci.copy()
+
         ## TODO better out name
-        out_cube_name = "flat_cubefiles/" + file_ifualign.replace("s3d","s3d_elisabethfix").split("/")[-1]
+        self.out_cube_name = "flat_cubefiles/" + file_ifualign.replace("s3d","s3d_elisabethfix").split("/")[-1]
+        if not os.path.isdir("flat_cubefiles"):
+            os.mkdir("flat_cubefiles")
+
+        ## parameters
+        self.mask_rad = mask_rad
 
         ## diagnostics
         if not self.cube_ifualign["SCI"].header["BUNIT"] == "MJy/sr":
             raise ValueError(f"{file_ifualign} is not in MJy/sr")
 
 
-    ## function 1: mask pixels!
     def mask_source(self):
+        """
+        Mask the source and its dither subtraction copies in the science cube.
+    
+        This function identifies the brightest source in the summed image and masks it,
+        as well as the two darkest regions (which should correspond to negative images of the source
+        from dither subtraction). The masking is applied to the cube_sci_mask attribute.
+        """
 
-        ## DO SOME MASKING on IFUALIGN
-        cube_sci = self.cube_ifualign["SCI"].data
-        cube_sci_mask = cube_sci.copy()
-
-        mask_rad = 4 ## TODO throughout need to find hardcoding stuff !!! 
         ##
-        im_sci = np.sum(cube_sci, axis=0)
+        im_sci = np.sum(self.cube_sci, axis=0)
 
         ## block out the max (target)
         pos = np.array(np.unravel_index(np.nanargmax(im_sci), im_sci.shape))
-        cube_sci_mask[:, pos[0]-mask_rad:pos[0]+mask_rad, pos[1]-mask_rad:pos[1]+mask_rad] = np.nan
-        im_sci = np.sum(cube_sci_mask, axis=0)
+        self.cube_sci_mask[:, pos[0]-self.mask_rad:pos[0]+self.mask_rad, pos[1]-self.mask_rad:pos[1]+self.mask_rad] = np.nan
+        # im_sci = np.sum(self.cube_sci_mask, axis=0)
 
-        ## and block out the two minima (dither subs)
+        ## and block out the two minima (dither subtraction copies of target)
         for i in range(2):
             pos = np.array(np.unravel_index(np.nanargmin(im_sci), im_sci.shape))
-            cube_sci_mask[:, pos[0]-mask_rad:pos[0]+mask_rad, pos[1]-mask_rad:pos[1]+mask_rad] = np.nan
-            im_sci = np.sum(cube_sci_mask, axis=0)
-            # im_sci[18,24] = 100_000
+            self.cube_sci_mask[:, pos[0]-self.mask_rad:pos[0]+self.mask_rad, pos[1]-self.mask_rad:pos[1]+self.mask_rad] = np.nan
+            # im_sci = np.sum(self.cube_sci_mask, axis=0)
+        im_sci = np.sum(self.cube_sci_mask, axis=0)
 
-        self.cube_sci = cube_sci
-        self.cube_sci_mask = cube_sci_mask
+        ## TODO need a diagnostic plot of cube_sci_mask i thinkkk -> and an im_sci plot (?)
 
-        ## TODO need a diagnostic plot of cube_sci_mask i thinkkk
-
-    ## function 2: rows, columns, flat
     def destripe(self):
+        '''
+        Destripe the science cube by subtracting mean values along both axes.
 
-        ## here we destripe
+        This method performs destriping on the science cube (self.cube_sci) and its masked version
+        (self.cube_sci_mask). It subtracts the mean values along both axes for each slice of the cube.
+        The destriped cube (non-masked version) is then saved to a file.
+        '''
 
-        ## slicebyslice_mask
         for q in range(self.cube_sci_mask.shape[0]):
 
-            ymean = np.nanmean(self.cube_sci_mask[q,:,:], axis=1) ## BLA BLA ax stuff #BLA this is corr (??)
+            ## axis 1
+            ymean = np.nanmean(self.cube_sci_mask[q,:,:], axis=1)
             sub1 = np.array(ymean)[:,None]
             sub1 = np.repeat(sub1,self.cube_sci_mask.shape[2],axis=1)
             self.cube_sci_mask[q,:,:] = self.cube_sci_mask[q,:,:] - sub1
             self.cube_sci[q,:,:] = self.cube_sci[q,:,:] - sub1
-            # print(np.nanmedian(cube_sci_mask_slicewise[q,:,:]))
-            #
+            
+            ## axis 2
             xmean = np.nanmean(self.cube_sci_mask[q,:,:], axis=0)
             sub2 = np.array(xmean)[None,:]
             sub2 = np.repeat(sub2,self.cube_sci_mask.shape[1],axis=0)
             self.cube_sci_mask[q,:,:] = self.cube_sci_mask[q,:,:] - sub2
             self.cube_sci[q,:,:] = self.cube_sci[q,:,:] - sub2
-            # print(np.nanmedian(cube_sci_mask_slicewise[q,:,:]))
-            # print("~")
 
-        im_sci = np.sum(self.cube_sci, axis=0) ## TODO this is still a mess !! IS NOT PLOTTING THE IMAGE CORRECTLY <<<<<
-        im_sci_mask = np.sum(self.cube_sci_mask, axis=0)
 
-        ## save cube_sci_slicewise!!
+        ## save destriped cube to a file
         self.cube_copy["SCI"].data = self.cube_sci        
         self.cube_copy.writeto(self.out_cube_name,overwrite=True)
 
+        im_sci = np.sum(self.cube_sci, axis=0)
+        im_sci_mask = np.sum(self.cube_sci_mask, axis=0)
 
 
-    ## function 3: make the plots
+
     def diagnostic_plots(self):
 
         return None ## TODO TODOOOOOO diagnostic plots !!! (split per function ??)
@@ -194,12 +203,12 @@ class CubeDestripe():
 
 
 
-filelist = sorted(glob.glob("../W0458/data_reprocessed211123/*s3d*"))
+filelist = sorted(glob.glob("../W0458/data_reprocessed2301024_ifualign/*s3d*"))
 print(filelist)
 
 for i_file, file in enumerate(filelist):
     cube_destripe = CubeDestripe(file)
-    cube_destripe.mask_sources()
+    cube_destripe.mask_source()
     cube_destripe.destripe() ## I have to pass the correct cube here somehow there's some interdependency ... but check this even works, first. TODO !
 
     if i_file > 3:
