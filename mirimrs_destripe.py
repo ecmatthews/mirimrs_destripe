@@ -349,8 +349,11 @@ if __name__ == "__main__":
     filelist = sorted(glob.glob("../W0458/data_reprocessed2301024_ifualign/*s3d*"))
     print(filelist)
 
+    if not os.path.isdir("example_outputs_w0458"):
+        os.mkdir("example_outputs_w0458")
+
     for i_file, file in enumerate(filelist):
-        cube_destripe = CubeDestripe(file, outfolder="blablabla")
+        cube_destripe = CubeDestripe(file, outfolder="example_outputs_w0458")
         cube_destripe.mask_source()
         cube_destripe.destripe()
         cube_destripe.run_stage3_extract(fringe=False, run=True)
