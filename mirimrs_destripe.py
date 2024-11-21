@@ -66,6 +66,14 @@ class CubeDestripe():
 
         ## read in cube, and make a copy -- where we can apply masking
         self.cube_sci = self.cube_ifualign["SCI"].data
+        ## slightly hacky solution to all-NAN slices at the end of channel 4
+        slice_totals = np.nansum(self.cube_sci, axis=(1,2))
+        pos = np.where(slice_totals == 0)[0]
+        if len(pos) > 0:
+            for p in pos:
+                self.cube_sci[p,:,:] = 0
+
+        ## store a copy so that we can mask it
         self.cube_sci_mask = self.cube_sci.copy()
 
         ## work out what the channel names are
