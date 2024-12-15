@@ -1,8 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
-from photutils.aperture import aperture_photometry
-from photutils.aperture import CircularAperture
 import glob
 import seaborn as sns
 from mpl_toolkits.axes_grid1 import make_axes_locatable
