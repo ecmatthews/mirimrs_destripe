@@ -10,7 +10,7 @@ Installation
 First clone the github repository:
 
 ```sh
-git clone mirimrs_destripe
+git clone git@github.com:ecmatthews/mirimrs_destripe.git
 ```
 
 Then, navigate to the cloned directory, and install with pip:
