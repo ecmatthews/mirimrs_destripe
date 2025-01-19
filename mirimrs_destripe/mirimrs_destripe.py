@@ -199,7 +199,8 @@ class CubeDestripe():
 
                 # Create a figure with a 2x3 grid using gridspec
                 fig = plt.figure(figsize=(7, 7))
-                gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[3,1])
+                figure_gap = 0.05
+                gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[3,1], wspace=2*figure_gap, hspace=figure_gap)
                 axs = [fig.add_subplot(gs[0, 0])]
                 axs.append(fig.add_subplot(gs[1, 0], sharex=axs[0]))
                 axs.append(fig.add_subplot(gs[0, 1], sharey=axs[0]))
@@ -263,10 +264,21 @@ class CubeDestripe():
                         # 
                         start = stop
 
+                ## axis positioning (assumes that image fills out x, not y, coords)
+                axs0pos = axs[0].get_position()
+                axs1pos = axs[1].get_position()
+                axs2pos = axs[2].get_position()
+
+                # axs[0].set_position([axs0pos.x0, axs0pos.y0, axs0pos.width, axs0pos.height])
+                axs[2].set_position([axs2pos.x0, axs0pos.y0, axs2pos.width, axs0pos.height])
+                axs[1].set_position([axs1pos.x0, axs0pos.y0-figure_gap-axs1pos.height, axs1pos.width, axs1pos.height])
+
+
 
                 plt.suptitle(f"{self.ch}{self.chpartL}")
 
                 plt.savefig(os.path.join(self.outfolder,"diagnostic_plots",f"cube_masked_bgval_{self.ch}{self.chpartL}{ext}.pdf"))
+
                 ext = "_nocorr"
 
 
@@ -376,6 +388,8 @@ if __name__ == "__main__":
         cube_destripe.destripe()
         cube_destripe.run_stage3_extract(fringe=False, run=True, ifu_rscale=2.)
         cube_destripe.plot_spectra_with_flattening()
+
+        break
 
         # if i_file > 2:
         #     break
